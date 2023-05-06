@@ -23,5 +23,6 @@ public class Main {
         InputStream is = Main.class.getClassLoader().getResourceAsStream("trunc_pitch_example_data");
         PitchReader pitchReader = new PitchReader(is);
         pitchReader.readPitch();
+        pitchReader.printTopTen();
     }
 }
