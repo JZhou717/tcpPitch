@@ -7,8 +7,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeMap;
 
 public class PitchReader {
     InputStream is;
@@ -60,72 +62,13 @@ public class PitchReader {
                         case 'd':
                             this.addLongOrder(pitch);
                             break;
+                        // Trade Message - long format
                         case 'r':
-                            // trade message long
+                            this.tradeLongMessage(pitch);
                             break;
                     }
-
-                    /*TODO
-                    Example 4 part sequence:
-                    Add Order
-                    28803219A4K27GA00003GS000200DIA   0001298500Y
-
-                    Execute Order
-                    28803224E4K27GA00003G00007700004AQ00001
-                    28803224E4K27GA00003G00007600004AQ00002
-
-                    Cancel Order
-                    28803238X4K27GA00003G000047
-
-
-
-
-                    Example Trade:
-                    28803240P4K27GA00003PB000100DXD   0000499600000N4AQ00003
-
-
-
-
-                    TODO: check for A, E, X, P, d, and r
-                    If it's an A, add to open Orders with symbol and share amount
-                    If it's E, remove the shares amount from open order, add that to executed order or - CHECK FOR MAX, remove open order if none remaining
-                    If it's X, remove shares amount from open order, remove open order if none remaining
-                    If it's P, add that amount to executed amount
-                    If it's d or r, same as A and P but parsing differently
-
-
-
-
-                    read A add order where A is in 8th position
-                    check for unused long order add order message type where the character at ind 8 is either A for normal Add Order or d for long add order with 2 more length for symbol and a 4 length participant id
-
-                    read E order executed and X order canceled -
-
-                    map order id to either shares executed or an open add order
-                     */
-
-
-
-
                 }
-
             } while(pitch != null);
-
-
-
-
-            System.out.println();
-            // Testing only
-            System.out.println(completedOrders);
-
-
-
-
-
-
-
-
-
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -143,12 +86,6 @@ public class PitchReader {
         int price = Integer.parseInt(pitch.substring(34, 44));
         char Display = pitch.charAt(44);
 
-        System.out.println("Add Order");
-        System.out.println("Order ID: " + orderId);
-        System.out.println("Shares: " + shares);
-        System.out.println("Symbol: " + symbol);
-        System.out.println();
-
         openOrders.put(orderId, new Order(symbol, shares));
     }
 
@@ -164,12 +101,6 @@ public class PitchReader {
         char Display = pitch.charAt(46);
         String participantId = pitch.substring(47);
 
-        System.out.println("Add Order");
-        System.out.println("Order ID: " + orderId);
-        System.out.println("Shares: " + shares);
-        System.out.println("Symbol: " + symbol);
-        System.out.println();
-
         openOrders.put(orderId, new Order(symbol, shares));
     }
 
@@ -179,11 +110,6 @@ public class PitchReader {
         int timestamp = Integer.parseInt(pitch.substring(0, 8));
         String orderId = pitch.substring(9, 21);
         int shares = Integer.parseInt(pitch.substring(21, 27));
-
-        System.out.println("Order Cancel");
-        System.out.println("Order ID: " + orderId);
-        System.out.println("Shares: " + shares);
-        System.out.println();
 
         Order order = openOrders.get(orderId);
         if(order != null) {
@@ -202,11 +128,6 @@ public class PitchReader {
         String orderId = pitch.substring(9, 21);
         int shares = Integer.parseInt(pitch.substring(21, 27));
         String executionId = pitch.substring(27);
-
-        System.out.println("Order Execute");
-        System.out.println("Order ID: " + orderId);
-        System.out.println("Shares: " + shares);
-        System.out.println();
 
         Order order = openOrders.get(orderId);
         if(order != null) {
@@ -231,18 +152,58 @@ public class PitchReader {
         int price = Integer.parseInt(pitch.substring(34, 44));
         String executionId = pitch.substring(44);
 
-        System.out.println("Trade Message");
-        System.out.println("Order ID: " + orderId);
-        System.out.println("Shares: " + shares);
-        System.out.println("Symbol: " + symbol);
-        System.out.println();
+        // adds executed shares to completedOrders count
+        completedOrders.put(symbol, completedOrders.getOrDefault(symbol, 0L) + shares);
+    }
 
+    // parses long version of Trade pitch message into its components and updates completedOrders with share amount
+    private void tradeLongMessage(String pitch) {
+        // unused fields parsed for scalability
+        int timestamp = Integer.parseInt(pitch.substring(0, 8));
+        String orderId = pitch.substring(9, 21);
+        char side = pitch.charAt(21);
+        int shares = Integer.parseInt(pitch.substring(22, 28));
+        String symbol = pitch.substring(28, 36);
+        int price = Integer.parseInt(pitch.substring(36, 46));
+        String executionId = pitch.substring(46);
 
         // adds executed shares to completedOrders count
         completedOrders.put(symbol, completedOrders.getOrDefault(symbol, 0L) + shares);
     }
 
-    // TODO: Prints the top 10 traded symbols by executed shares
+
+    // Prints the top 10 traded symbols by executed shares using TreeMap
     void printTopTen() {
+        // use comparator and new treemap to get top 10 elements
+        SharesComparator sharesComparator = new SharesComparator(completedOrders);
+        TreeMap<String, Long> sortedCompletedOrders = new TreeMap<>(sharesComparator);
+        sortedCompletedOrders.putAll(completedOrders);
+
+        int limit = 10;
+        for(var entry : sortedCompletedOrders.entrySet()) {
+            if(limit > 0) {
+                System.out.println(entry.getKey() + "  " + entry.getValue());
+                sortedCompletedOrders.remove(entry.getKey());
+                limit--;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Use custom comparator, sorts based on value in completedOrders map for a given symbol
+    private static class SharesComparator implements Comparator<String> {
+        Map<String, Long> base;
+        public SharesComparator(Map<String, Long> base) {
+            this.base = base;
+        }
+        @Override
+        public int compare(String a, String b) {
+            if(base.get(a) >= base.get(b)) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
     }
 }
